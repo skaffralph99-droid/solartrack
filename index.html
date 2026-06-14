@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>SolarTrack</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script>tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','-apple-system','system-ui','sans-serif']}}}}</script>
+<style>
+*{-webkit-tap-highlight-color:transparent}
+body{background:#0B0F1A;font-family:'Inter',sans-serif}
+.glass{background:rgba(30,41,59,0.7);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.06)}
+.glow-orange{box-shadow:0 4px 20px rgba(245,158,11,0.15)}
+.glow-red{box-shadow:0 4px 20px rgba(239,68,68,0.15)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.fade-up{animation:fadeUp 0.4s ease both}
+.fade-up-1{animation-delay:0.05s}.fade-up-2{animation-delay:0.1s}.fade-up-3{animation-delay:0.15s}.fade-up-4{animation-delay:0.2s}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:0.3}}
+.pulse-dot{animation:pulse-dot 1.5s infinite}
+@keyframes countUp{from{opacity:0}to{opacity:1}}
+.tab-active{color:#F59E0B;border-bottom:2px solid #F59E0B}
+.modal-bg{background:rgba(0,0,0,0.6);backdrop-filter:blur(8px)}
+input,select,textarea{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#F1F5F9;border-radius:12px;padding:10px 14px;font-size:14px;font-family:inherit;width:100%;outline:none;transition:border-color 0.2s}
+input:focus,select:focus,textarea:focus{border-color:#F59E0B}
+select option{background:#1E293B;color:#F1F5F9}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#334155;border-radius:4px}
+</style>
+</head>
+<body class="text-slate-200 min-h-screen">
+<div id="app"></div>
+<script>
+const SB_URL='https://jgbuxybpfijismzisqfd.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpnYnV4eWJwZmlqaXNtemlzcWZkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgxMDExNTEsImV4cCI6MjA2MzY3NzE1MX0.a5jHFHHoWMEkM-HaR2MNJgMMj8xfSXNqfrqEL_gSFYU';
+const sb=supabase.createClient(SB_URL,SB_KEY);
+
+let state={tab:'dashboard',customers:[],installations:[],payments:[],maintenance:[],modal:null,editItem:null,loading:true};
+
+async function loadData(){
+  state.loading=true; render();
+  const[c,i,p,m]=await Promise.all([
+    sb.from('solar_customers').select('*').order('created_at',{ascending:false}),
+    sb.from('solar_installations').select('*,solar_customers(name,location,phone)').order('created_at',{ascending:false}),
+    sb.from('solar_payments').select('*,solar_customers(name,location),solar_installations(system_size_kw)').order('due_date',{ascending:true}),
+    sb.from('solar_maintenance').select('*,solar_customers(name,location),solar_installations(system_size_kw)').order('due_date',{ascending:true})
+  ]);
+  state.customers=c.data||[];state.installations=i.data||[];state.payments=p.data||[];state.maintenance=m.data||[];
+  state.loading=false;render();
+}
+
+function stats(){
+  const totalInstalls=state.installations.length;
+  const totalRevenue=state.installations.reduce((s,i)=>s+Number(i.total_price||0),0);
+  const totalPaid=state.installations.reduce((s,i)=>s+Number(i.paid_amount||0),0);
+  const overdue=state.payments.filter(p=>p.status==='overdue');
+  const overdueAmt=overdue.reduce((s,p)=>s+Number(p.amount||0),0);
+  const pendingMaint=state.maintenance.filter(m=>m.status!=='completed').length;
+  const overdueMaint=state.maintenance.filter(m=>m.status==='overdue').length;
+  return{totalInstalls,totalRevenue,totalPaid,pending:totalRevenue-totalPaid,overdueAmt,overdueCount:overdue.length,pendingMaint,overdueMaint};
+}
+
+function fmt(n){return'$'+Number(n||0).toLocaleString('en-US',{maximumFractionDigits:0})}
+function fmtDate(d){if(!d)return'—';return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+
+function statusBadge(s){
+  const map={overdue:'bg-red-500/15 text-red-400',pending:'bg-amber-500/15 text-amber-400',paid:'bg-emerald-500/15 text-emerald-400',scheduled:'bg-blue-500/15 text-blue-400',completed:'bg-emerald-500/15 text-emerald-400',in_progress:'bg-amber-500/15 text-amber-400'};
+  return`<span class="text-[10px] font-semibold px-2.5 py-1 rounded-full ${map[s]||'bg-slate-500/15 text-slate-400'}">${(s||'').replace('_',' ').replace(/^\w/,c=>c.toUpperCase())}</span>`;
+}
+
+function maintType(t){
+  const map={panel_cleaning:'🧹 Panel Cleaning',battery_check:'🔋 Battery Check',inverter_check:'⚡ Inverter Check',wiring_inspection:'🔌 Wiring Inspection'};
+  return map[t]||t;
+}
+
+function renderDashboard(){
+  const s=stats();
+  return`
+  <div class="space-y-4">
+    <div class="flex items-center justify-between">
+      <div><h2 class="text-2xl font-extrabold text-white">Dashboard</h2><p class="text-sm text-slate-500 mt-1">Business overview</p></div>
+      <button onclick="state.tab='customers';state.modal='add-customer';render()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs px-4 py-2.5 rounded-xl transition">+ New Customer</button>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div class="glass rounded-2xl p-4 fade-up fade-up-1 cursor-pointer hover:border-amber-500/30 transition" onclick="state.tab='installations';render()">
+        <div class="text-xl mb-2">⚡</div><div class="text-2xl font-extrabold text-white">${s.totalInstalls}</div>
+        <div class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider mt-1">Installations</div>
+      </div>
+      <div class="glass rounded-2xl p-4 fade-up fade-up-2 cursor-pointer hover:border-emerald-500/30 transition" onclick="state.tab='payments';render()">
+        <div class="text-xl mb-2">💰</div><div class="text-2xl font-extrabold text-white">${fmt(s.totalRevenue)}</div>
+        <div class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider mt-1">Total Revenue</div>
+      </div>
+      <div class="glass rounded-2xl p-4 fade-up fade-up-3 cursor-pointer hover:border-red-500/30 transition" onclick="state.tab='payments';render()">
+        <div class="text-xl mb-2">⏳</div><div class="text-2xl font-extrabold text-red-400">${fmt(s.overdueAmt)}</div>
+        <div class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider mt-1">Overdue</div>
+        <div class="text-[10px] mt-1.5 px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-semibold inline-block">${s.overdueCount} customers</div>
+      </div>
+      <div class="glass rounded-2xl p-4 fade-up fade-up-4 cursor-pointer hover:border-blue-500/30 transition" onclick="state.tab='maintenance';render()">
+        <div class="text-xl mb-2">🔧</div><div class="text-2xl font-extrabold text-white">${s.pendingMaint}</div>
+        <div class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider mt-1">Maintenance Due</div>
+        ${s.overdueMaint?`<div class="text-[10px] mt-1.5 px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-semibold inline-block">${s.overdueMaint} overdue</div>`:''}
+      </div>
+    </div>
+    ${s.overdueAmt>0?`<div class="bg-gradient-to-r from-red-950 to-red-900 rounded-2xl p-4 flex items-center justify-between border border-red-500/20 fade-up">
+      <div class="flex items-center gap-3"><div class="w-3 h-3 rounded-full bg-red-500 pulse-dot"></div><div><div class="text-xl font-extrabold text-red-300">${fmt(s.overdueAmt)}</div><div class="text-xs text-red-400/70">overdue installments</div></div></div>
+      <button onclick="state.tab='payments';render()" class="bg-red-500 text-white text-xs font-bold px-4 py-2 rounded-xl">Collect →</button>
+    </div>`:''}
+    <div class="glass rounded-2xl p-4 fade-up">
+      <div class="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-3">Recent Payments</div>
+      ${state.payments.slice(0,4).map(p=>`<div class="flex items-center justify-between py-2.5 border-b border-white/5 last:border-0">
+        <div><div class="text-sm font-semibold">${p.solar_customers?.name||'—'}</div><div class="text-xs text-slate-500">${p.solar_installations?.system_size_kw||''}kW · #${p.installment_number||''} of ${p.installment_number?'12':''}</div></div>
+        <div class="text-right"><div class="text-sm font-bold ${p.status==='overdue'?'text-red-400':p.status==='paid'?'text-emerald-400':'text-amber-400'}">${fmt(p.amount)}</div>${statusBadge(p.status)}</div>
+      </div>`).join('')}
+    </div>
+    <div class="glass rounded-2xl p-4 fade-up">
+      <div class="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-3">Upcoming Maintenance</div>
+      ${state.maintenance.filter(m=>m.status!=='completed').slice(0,3).map(m=>`<div class="flex items-center justify-between py-2.5 border-b border-white/5 last:border-0">
+        <div class="flex items-center gap-3"><div class="text-lg">${m.type==='panel_cleaning'?'🧹':m.type==='battery_check'?'🔋':'⚡'}</div><div><div class="text-sm font-semibold">${m.solar_customers?.name||'—'}</div><div class="text-xs text-slate-500">${maintType(m.type).split(' ').slice(1).join(' ')} · ${fmtDate(m.due_date)}</div></div></div>
+        ${statusBadge(m.status)}
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderCustomers(){
+  return`<div class="space-y-4">
+    <div class="flex items-center justify-between">
+      <div><h2 class="text-2xl font-extrabold text-white">Customers</h2><p class="text-sm text-slate-500 mt-1">${state.customers.length} total</p></div>
+      <button onclick="state.modal='add-customer';state.editItem=null;render()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs px-4 py-2.5 rounded-xl transition">+ Add</button>
+    </div>
+    ${state.customers.map((c,i)=>`<div class="glass rounded-2xl p-4 fade-up fade-up-${Math.min(i+1,4)} flex items-center justify-between cursor-pointer hover:border-amber-500/20 transition" onclick="viewCustomer('${c.id}')">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-400 font-bold text-sm shrink-0">${(c.name||'?')[0]}</div>
+        <div class="min-w-0"><div class="text-sm font-semibold truncate">${c.name}</div><div class="text-xs text-slate-500">📍 ${c.location||'—'} · ${c.phone||''}</div></div>
+      </div>
+      <div class="text-slate-600 shrink-0">→</div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function renderInstallations(){
+  return`<div class="space-y-4">
+    <div class="flex items-center justify-between">
+      <div><h2 class="text-2xl font-extrabold text-white">Installations</h2><p class="text-sm text-slate-500 mt-1">${state.installations.length} total · ${state.installations.reduce((s,i)=>s+Number(i.system_size_kw),0)}kW capacity</p></div>
+      <button onclick="state.modal='add-installation';state.editItem=null;render()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs px-4 py-2.5 rounded-xl transition">+ Add</button>
+    </div>
+    ${state.installations.map((inst,i)=>`<div class="glass rounded-2xl p-4 fade-up fade-up-${Math.min(i+1,4)}">
+      <div class="flex items-center justify-between mb-3">
+        <div><div class="text-sm font-bold">${inst.solar_customers?.name||'—'}</div><div class="text-xs text-slate-500">📍 ${inst.solar_customers?.location||''} · ${inst.system_size_kw}kW</div></div>
+        <div class="flex items-center gap-2">${statusBadge(inst.status)}<div class="text-sm font-bold text-amber-400">${fmt(inst.total_price)}</div></div>
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        ${inst.panel_count?`<span class="text-[10px] bg-white/5 border border-white/5 px-2.5 py-1 rounded-lg text-slate-400">${inst.panel_count}× ${inst.panel_brand||''}</span>`:''}
+        ${inst.inverter_brand?`<span class="text-[10px] bg-white/5 border border-white/5 px-2.5 py-1 rounded-lg text-slate-400">${inst.inverter_brand} ${inst.inverter_size||''}</span>`:''}
+        ${inst.battery_count?`<span class="text-[10px] bg-white/5 border border-white/5 px-2.5 py-1 rounded-lg text-slate-400">${inst.battery_count}× ${inst.battery_brand||''} ${inst.battery_capacity||''}</span>`:''}
+      </div>
+      <div class="mt-3 flex items-center justify-between text-xs">
+        <span class="text-slate-500">${fmtDate(inst.installed_date)}</span>
+        <div class="flex items-center gap-2">
+          <div class="h-1.5 w-24 bg-white/5 rounded-full overflow-hidden"><div class="h-full rounded-full ${Number(inst.paid_amount)>=Number(inst.total_price)?'bg-emerald-500':'bg-amber-500'}" style="width:${Math.min(100,Math.round(Number(inst.paid_amount)/Number(inst.total_price)*100))}%"></div></div>
+          <span class="text-slate-400">${Math.round(Number(inst.paid_amount)/Number(inst.total_price)*100)}% paid</span>
+        </div>
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function renderPayments(){
+  const overdue=state.payments.filter(p=>p.status==='overdue');
+  const pending=state.payments.filter(p=>p.status==='pending');
+  const paid=state.payments.filter(p=>p.status==='paid');
+  return`<div class="space-y-4">
+    <div><h2 class="text-2xl font-extrabold text-white">Payments</h2><p class="text-sm text-slate-500 mt-1">${state.payments.length} installments tracked</p></div>
+    ${overdue.length?`<div class="space-y-2"><div class="text-xs text-red-400 font-semibold uppercase tracking-wider px-1">⚠️ Overdue (${overdue.length})</div>
+    ${overdue.map(p=>paymentCard(p,'red')).join('')}</div>`:''}
+    ${pending.length?`<div class="space-y-2"><div class="text-xs text-amber-400 font-semibold uppercase tracking-wider px-1 mt-2">⏳ Upcoming (${pending.length})</div>
+    ${pending.map(p=>paymentCard(p,'amber')).join('')}</div>`:''}
+    ${paid.length?`<div class="space-y-2"><div class="text-xs text-emerald-400 font-semibold uppercase tracking-wider px-1 mt-2">✓ Paid (${paid.length})</div>
+    ${paid.map(p=>paymentCard(p,'green')).join('')}</div>`:''}
+  </div>`;
+}
+
+function paymentCard(p,color){
+  return`<div class="glass rounded-2xl p-4 flex items-center justify-between fade-up">
+    <div class="min-w-0 flex-1">
+      <div class="text-sm font-semibold">${p.solar_customers?.name||'—'}</div>
+      <div class="text-xs text-slate-500">${p.solar_installations?.system_size_kw||''}kW · Installment #${p.installment_number||'—'} · Due ${fmtDate(p.due_date)}</div>
+    </div>
+    <div class="flex items-center gap-3 shrink-0">
+      <div class="text-right">
+        <div class="text-base font-bold ${color==='red'?'text-red-400':color==='amber'?'text-amber-400':'text-emerald-400'}">${fmt(p.amount)}</div>
+        ${statusBadge(p.status)}
+      </div>
+      ${p.status!=='paid'?`<button onclick="markPaid('${p.id}')" class="bg-emerald-500/15 text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-lg hover:bg-emerald-500/25 transition">✓ Paid</button>`:''}
+    </div>
+  </div>`;
+}
+
+function renderMaintenance(){
+  return`<div class="space-y-4">
+    <div class="flex items-center justify-between">
+      <div><h2 class="text-2xl font-extrabold text-white">Maintenance</h2><p class="text-sm text-slate-500 mt-1">${state.maintenance.length} tasks</p></div>
+      <button onclick="state.modal='add-maintenance';state.editItem=null;render()" class="bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs px-4 py-2.5 rounded-xl transition">+ Schedule</button>
+    </div>
+    ${state.maintenance.map((m,i)=>`<div class="glass rounded-2xl p-4 fade-up fade-up-${Math.min(i+1,4)} flex items-center justify-between">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-10 h-10 rounded-xl ${m.status==='overdue'?'bg-red-500/15':'bg-blue-500/15'} flex items-center justify-center text-lg shrink-0">${m.type==='panel_cleaning'?'🧹':m.type==='battery_check'?'🔋':m.type==='inverter_check'?'⚡':'🔌'}</div>
+        <div class="min-w-0"><div class="text-sm font-semibold truncate">${maintType(m.type)}</div><div class="text-xs text-slate-500">${m.solar_customers?.name||'—'} · Due ${fmtDate(m.due_date)}</div></div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        ${statusBadge(m.status)}
+        ${m.status!=='completed'?`<button onclick="completeMaint('${m.id}')" class="bg-emerald-500/15 text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-lg hover:bg-emerald-500/25 transition">✓ Done</button>`:''}
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function renderModal(){
+  if(!state.modal)return'';
+  if(state.modal==='add-customer')return modalWrap('New Customer',`
+    <input id="m-name" placeholder="Customer name" class="mb-3"><input id="m-phone" placeholder="Phone (+961...)" class="mb-3">
+    <input id="m-location" placeholder="Location (city)" class="mb-3"><textarea id="m-notes" placeholder="Notes" rows="2" class="mb-4"></textarea>
+    <button onclick="saveCustomer()" class="w-full bg-amber-500 text-black font-bold py-3 rounded-xl hover:bg-amber-400 transition">Save Customer</button>`);
+  if(state.modal==='add-installation')return modalWrap('New Installation',`
+    <select id="m-cust" class="mb-3"><option value="">Select customer</option>${state.customers.map(c=>`<option value="${c.id}">${c.name} — ${c.location}</option>`).join('')}</select>
+    <div class="grid grid-cols-2 gap-3 mb-3"><input id="m-size" placeholder="System size (kW)" type="number"><input id="m-price" placeholder="Total price ($)" type="number"></div>
+    <div class="grid grid-cols-2 gap-3 mb-3"><input id="m-pbrand" placeholder="Panel brand"><input id="m-pcount" placeholder="Panel count" type="number"></div>
+    <div class="grid grid-cols-2 gap-3 mb-3"><input id="m-ibrand" placeholder="Inverter brand"><input id="m-isize" placeholder="Inverter size"></div>
+    <div class="grid grid-cols-2 gap-3 mb-3"><input id="m-bbrand" placeholder="Battery brand"><input id="m-bcount" placeholder="Battery count" type="number"></div>
+    <div class="grid grid-cols-2 gap-3 mb-3"><input id="m-bcap" placeholder="Battery capacity"><input id="m-installments" placeholder="# of installments" type="number"></div>
+    <button onclick="saveInstallation()" class="w-full bg-amber-500 text-black font-bold py-3 rounded-xl hover:bg-amber-400 transition">Save Installation</button>`);
+  if(state.modal==='add-maintenance')return modalWrap('Schedule Maintenance',`
+    <select id="m-inst" class="mb-3"><option value="">Select installation</option>${state.installations.map(inst=>`<option value="${inst.id}" data-cid="${inst.customer_id}">${inst.solar_customers?.name} — ${inst.system_size_kw}kW</option>`).join('')}</select>
+    <select id="m-type" class="mb-3"><option value="panel_cleaning">🧹 Panel Cleaning</option><option value="battery_check">🔋 Battery Check</option><option value="inverter_check">⚡ Inverter Check</option><option value="wiring_inspection">🔌 Wiring Inspection</option></select>
+    <input id="m-due" type="date" class="mb-3"><input id="m-cost" placeholder="Cost ($)" type="number" class="mb-4">
+    <button onclick="saveMaintenance()" class="w-full bg-amber-500 text-black font-bold py-3 rounded-xl hover:bg-amber-400 transition">Schedule</button>`);
+  return'';
+}
+
+function modalWrap(title,content){
+  return`<div class="fixed inset-0 modal-bg z-50 flex items-end sm:items-center justify-center p-4" onclick="if(event.target===this){state.modal=null;render()}">
+    <div class="bg-slate-900 rounded-2xl p-5 w-full max-w-md border border-white/10 max-h-[85vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-bold text-white">${title}</h3>
+        <button onclick="state.modal=null;render()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-slate-400 hover:text-white transition">✕</button>
+      </div>${content}
+    </div></div>`;
+}
+
+async function saveCustomer(){
+  const d={name:v('m-name'),phone:v('m-phone'),location:v('m-location'),notes:v('m-notes')};
+  if(!d.name)return alert('Name is required');
+  await sb.from('solar_customers').insert(d);state.modal=null;await loadData();
+}
+async function saveInstallation(){
+  const d={customer_id:v('m-cust'),system_size_kw:Number(v('m-size')),total_price:Number(v('m-price')),panel_brand:v('m-pbrand'),panel_count:Number(v('m-pcount')),inverter_brand:v('m-ibrand'),inverter_size:v('m-isize'),battery_brand:v('m-bbrand'),battery_count:Number(v('m-bcount')),battery_capacity:v('m-bcap'),total_installments:Number(v('m-installments'))||1,status:'in_progress'};
+  if(!d.customer_id||!d.system_size_kw)return alert('Customer and system size required');
+  await sb.from('solar_installations').insert(d);state.modal=null;await loadData();
+}
+async function saveMaintenance(){
+  const instId=v('m-inst');const opt=document.querySelector('#m-inst option:checked');const cid=opt?.dataset?.cid;
+  const d={installation_id:instId,customer_id:cid,type:v('m-type'),due_date:v('m-due'),cost:Number(v('m-cost'))||0,status:'scheduled'};
+  if(!d.installation_id||!d.due_date)return alert('Installation and due date required');
+  await sb.from('solar_maintenance').insert(d);state.modal=null;await loadData();
+}
+async function markPaid(id){
+  await sb.from('solar_payments').update({status:'paid',paid_date:new Date().toISOString().split('T')[0]}).eq('id',id);
+  await loadData();
+}
+async function completeMaint(id){
+  await sb.from('solar_maintenance').update({status:'completed',completed_date:new Date().toISOString().split('T')[0]}).eq('id',id);
+  await loadData();
+}
+async function deleteCustomer(id){
+  if(!confirm('Delete this customer and all their data?'))return;
+  await sb.from('solar_customers').delete().eq('id',id);await loadData();state.tab='customers';render();
+}
+function viewCustomer(id){
+  state.editItem=id;state.modal='view-customer';render();
+}
+function v(id){return document.getElementById(id)?.value?.trim()||''}
+
+function render(){
+  const tabs=[{id:'dashboard',icon:'📊',label:'Home'},{id:'customers',icon:'👥',label:'Clients'},{id:'installations',icon:'⚡',label:'Installs'},{id:'payments',icon:'💰',label:'Payments'},{id:'maintenance',icon:'🔧',label:'Maint.'}];
+  let content='';
+  if(state.loading)content='<div class="flex items-center justify-center h-64"><div class="text-amber-500 text-lg">Loading...</div></div>';
+  else if(state.tab==='dashboard')content=renderDashboard();
+  else if(state.tab==='customers')content=renderCustomers();
+  else if(state.tab==='installations')content=renderInstallations();
+  else if(state.tab==='payments')content=renderPayments();
+  else if(state.tab==='maintenance')content=renderMaintenance();
+
+  document.getElementById('app').innerHTML=`
+    <div class="fixed top-0 left-0 right-0 z-40 bg-[#0B0F1A]/90 backdrop-blur-xl border-b border-white/5">
+      <div class="flex items-center justify-between px-5 pt-3 pb-2 max-w-lg mx-auto">
+        <div class="flex items-center gap-2.5"><div class="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-red-500 flex items-center justify-center text-sm shadow-lg shadow-amber-500/20">☀️</div><span class="text-base font-extrabold text-white tracking-tight">SolarTrack</span></div>
+        <div class="text-[10px] text-slate-600 font-medium">CraftCode</div>
+      </div>
+    </div>
+    <div class="max-w-lg mx-auto px-4 pt-16 pb-24">${content}</div>
+    ${renderModal()}
+    <div class="fixed bottom-0 left-0 right-0 bg-[#0F172A]/95 backdrop-blur-2xl border-t border-white/5 z-40">
+      <div class="flex justify-around max-w-lg mx-auto py-2 pb-[max(12px,env(safe-area-inset-bottom))]">
+        ${tabs.map(t=>`<button onclick="state.tab='${t.id}';render()" class="flex flex-col items-center gap-0.5 px-3 py-1 relative ${state.tab===t.id?'text-amber-400':'text-slate-600'} transition">
+          ${state.tab===t.id?'<div class="absolute -top-2 w-5 h-0.5 rounded-full bg-amber-400"></div>':''}
+          <span class="text-lg">${t.icon}</span><span class="text-[10px] font-semibold">${t.label}</span>
+        </button>`).join('')}
+      </div>
+    </div>`;
+}
+
+loadData();
+</script>
+</body>
+</html>
