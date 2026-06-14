@@ -504,11 +504,12 @@ function msgCustomer(phone, name, amount) {
 }
 
 function msgWhatsApp(phone, name, amount) {
-  var clean = phone.replace(/[^0-9]/g, '');
-  if (clean.startsWith('961')) clean = clean;
-  else if (clean.startsWith('0')) clean = '961' + clean.substring(1);
-  var msg = 'Hi ' + name + ', this is a friendly reminder that your installment payment of $' + amount + ' is due. Please let us know when you can make the payment. Thank you! ☀️';
-  window.open('https://wa.me/' + clean + '?text=' + encodeURIComponent(msg), '_blank');
+  var clean = (phone||'').replace(/[^0-9]/g, '');
+  if (!clean) { alert('No phone number for this customer'); return; }
+  if (clean.length === 8) clean = '961' + clean;
+  if (clean.startsWith('0')) clean = '961' + clean.substring(1);
+  var msg = 'Hi ' + name + ', this is a friendly reminder that your installment payment of $' + amount + ' is due. Please let us know when you can make the payment. Thank you!';
+  window.open('https://wa.me/' + clean + '?text=' + encodeURIComponent(msg));
 }
 
 async function markPaid(id){
