@@ -42,8 +42,8 @@ async function loadData(){
   const[c,i,p,m]=await Promise.all([
     sb.from('solar_customers').select('*').order('created_at',{ascending:false}),
     sb.from('solar_installations').select('*,solar_customers(name,location,phone)').order('created_at',{ascending:false}),
-    sb.from('solar_payments').select('*,solar_customers(name,location),solar_installations(system_size_kw)').order('due_date',{ascending:true}),
-    sb.from('solar_maintenance').select('*,solar_customers(name,location),solar_installations(system_size_kw)').order('due_date',{ascending:true})
+    sb.from('solar_payments').select('*,solar_customers(name,location,phone),solar_installations(system_size_kw)').order('due_date',{ascending:true}),
+    sb.from('solar_maintenance').select('*,solar_customers(name,location,phone),solar_installations(system_size_kw)').order('due_date',{ascending:true})
   ]);
   state.customers=c.data||[];state.installations=i.data||[];state.payments=p.data||[];state.maintenance=m.data||[];
   state.loading=false;render();
