@@ -287,7 +287,7 @@ function paymentCard(p,color){
         <div class="text-base font-bold ${color==='red'?'text-red-400':color==='amber'?'text-amber-400':'text-emerald-400'}">${fmt(p.amount)}</div>
         ${statusBadge(p.status)}
       </div>
-      ${p.status!=='paid'?`<div class="flex gap-1.5"><a href="https://wa.me/${(p.solar_customers?.phone||'').replace(/[^0-9]/g,'')}?text=${encodeURIComponent('Hi '+(p.solar_customers?.name||'')+', this is a friendly reminder that your installment payment of $'+p.amount+' is due. Please let us know when you can make the payment. Thank you!')}" target="_blank" class="bg-green-500/15 text-green-400 text-[10px] font-bold px-2.5 py-1.5 rounded-lg hover:bg-green-500/25 transition flex items-center">📲</a><button onclick="markPaid('${p.id}')" class="bg-emerald-500/15 text-emerald-400 text-[10px] font-bold px-3 py-1.5 rounded-lg hover:bg-emerald-500/25 transition">✓ Paid</button></div>`:''}
+      ${p.status!=='paid'?`<div class="flex gap-2"><button onclick="msgWhatsApp('${p.solar_customers?.phone||''}','${p.solar_customers?.name||''}','${p.amount}')" class="bg-green-600/20 text-green-400 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-green-500/30 transition">📲 Msg</button><button onclick="markPaid('${p.id}')" class="bg-emerald-500/15 text-emerald-400 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-emerald-500/25 transition">✓ Paid</button></div>`:''}
     </div>
   </div>`;
 }
@@ -501,6 +501,14 @@ function msgCustomer(phone, name, amount) {
   const clean = (phone||'').replace(/[^0-9+]/g,'');
   const msg = encodeURIComponent('Hi ' + name + ', this is a friendly reminder that your installment payment of $' + amount + ' is due. Please let us know when you can make the payment. Thank you! ☀️');
   window.open('https://wa.me/' + clean.replace('+','') + '?text=' + msg, '_blank');
+}
+
+function msgWhatsApp(phone, name, amount) {
+  var clean = phone.replace(/[^0-9]/g, '');
+  if (clean.startsWith('961')) clean = clean;
+  else if (clean.startsWith('0')) clean = '961' + clean.substring(1);
+  var msg = 'Hi ' + name + ', this is a friendly reminder that your installment payment of $' + amount + ' is due. Please let us know when you can make the payment. Thank you! ☀️';
+  window.open('https://wa.me/' + clean + '?text=' + encodeURIComponent(msg), '_blank');
 }
 
 async function markPaid(id){
